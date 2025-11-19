@@ -6,13 +6,13 @@
 <style>
 body {
     background-color: black;
-    color: #0f0;
+    color: #ccc; /* gray text, no green */
     font-family: "Courier New", monospace;
     padding: 20px;
 }
 
 #terminal {
-    border: 2px solid #0f0;
+    border: 2px solid #ccc;
     padding: 10px;
     width: 700px;
     height: 500px;
@@ -22,7 +22,7 @@ body {
 
 input {
     background: black;
-    color: #0f0;
+    color: #ccc;
     border: none;
     outline: none;
     font-family: "Courier New", monospace;
@@ -33,7 +33,7 @@ input {
 .blink {
     display: inline-block;
     width: 10px;
-    background: #0f0;
+    background: #ccc;
     animation: blink 1s step-start infinite;
     margin-left: 2px;
 }
@@ -43,7 +43,7 @@ input {
 
 .ascii-img {
     width: 150px;
-    border: 1px solid #0f0;
+    border: 1px solid #ccc;
     margin-top: 5px;
 }
 </style>
@@ -52,28 +52,35 @@ input {
 
 <div id="terminal"></div>
 <div>
-<span id="prompt">C:\RBX></span><input id="cmdInput" autocomplete="off"><span class="blink">&nbsp;</span>
+<input id="cmdInput" autocomplete="off"><span class="blink">&nbsp;</span>
 </div>
+
+<!-- Sound beeps -->
+<audio id="beep1" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+<audio id="beep2" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
 
 <script>
 const term = document.getElementById("terminal");
 const input = document.getElementById("cmdInput");
-const promptSpan = document.getElementById("prompt");
+const beep1 = document.getElementById("beep1");
+const beep2 = document.getElementById("beep2");
+
+function beep(){ beep1.play(); }
+function beepSuccess(){ beep2.play(); }
 
 let commandHistory = [];
 let historyIndex = 0;
 
 input.focus();
 
-// Basic command system
+// COMMAND SYSTEM
 input.addEventListener("keydown", async (e)=>{
     if(e.key==="Enter"){
         const cmd = input.value.trim();
         commandHistory.push(cmd);
         historyIndex = commandHistory.length;
-        term.innerHTML += `C:\\RBX> ${cmd}\n`;
+        term.innerHTML += `${cmd}\n`;
         input.value = "";
-
         await handleCommand(cmd);
         term.scrollTop = term.scrollHeight;
     } else if(e.key==="ArrowUp"){
@@ -88,90 +95,112 @@ input.addEventListener("keydown", async (e)=>{
 async function handleCommand(cmd){
     const args = cmd.split(" ");
     const main = args[0].toLowerCase();
-    const out = term;
 
     if(main==="profile" && args[1]){
-        const username = args[1];
-        out.innerHTML += "Loading profile...\n";
-        await loadProfile(username);
+        term.innerHTML += "Loading profile...\n";
+        beep();
+        await loadProfile(args[1]);
     } else if(main==="avatar" && args[1]){
-        const username = args[1];
-        out.innerHTML += "Loading avatar...\n";
-        await loadAvatar(username);
+        term.innerHTML += "Loading avatar...\n";
+        beep();
+        await loadAvatar(args[1]);
     } else if(main==="help"){
-        out.innerHTML += "Commands:\n profile <username>\n avatar <username>\n help\n clear\n";
+        beep();
+        term.innerHTML += "Commands:\n profile <username>\n avatar <username>\n help\n clear\n";
     } else if(main==="clear"){
+        beep();
         term.innerHTML = "";
     } else {
-        out.innerHTML += "Unknown command. Type 'help' for commands.\n";
+        beep();
+        term.innerHTML += "Unknown command. Type 'help' for commands.\n";
     }
 }
 
-// ------- CORS Roblox API --------
-const corsProxy = "https://corsproxy.io/?"; // you can swap a different proxy if this breaks
+// CORS Roblox API
+const corsProxy = "https://corsproxy.io/?"; // Can swap if needed
 
 async function loadProfile(username){
-    const out = term;
-    try{
-        let res = await fetch(corsProxy + encodeURIComponent("https://users.roblox.com/v1/usernames/users"),{
-            method: "POST",
-            headers: { "Content-Type":"application/json" },
-            body: JSON.stringify({usernames:[username]})
-        });
-        let data = await res.json();
-        if(!data.data || !data.data[0]){
-            out.innerHTML += "ERROR: User not found.\n";
-            return;
+    fakeLoading("ACCESSING ROBLOX DATABASE...", async ()=>{
+        try{
+            let userRes = await fetch(corsProxy + encodeURIComponent("https://users.roblox.com/v1/usernames/users"),{
+                method:"POST",
+                headers:{"Content-Type":"application/json"},
+                body: JSON.stringify({usernames:[username]})
+            });
+            let userData = await userRes.json();
+            if(!userData.data || !userData.data[0]){
+                term.innerHTML += "ERROR: User not found.\n";
+                return;
+            }
+            const user = userData.data[0];
+
+            // Followers and friends count
+            let followersRes = await fetch(corsProxy + encodeURIComponent(`https://friends.roblox.com/v1/users/${user.id}/followers/count`));
+            let followers = await followersRes.json();
+
+            let friendsRes = await fetch(corsProxy + encodeURIComponent(`https://friends.roblox.com/v1/users/${user.id}/friends/count`));
+            let friends = await friendsRes.json();
+
+            term.innerHTML +=
+                `Username: ${user.name}\nDisplay Name: ${user.displayName}\nID: ${user.id}\nDescription: ${user.description||"None"}\nFollowers: ${followers.count}\nFriends: ${friends.count}\n`;
+
+            beepSuccess();
+            await showAvatar(user.id);
+        } catch{
+            term.innerHTML += "ERROR reaching Roblox API.\n";
         }
-        const user = data.data[0];
-
-        // friends + followers
-        let followersRes = await fetch(corsProxy + encodeURIComponent(`https://friends.roblox.com/v1/users/${user.id}/followers/count`));
-        let followers = await followersRes.json();
-
-        let friendsRes = await fetch(corsProxy + encodeURIComponent(`https://friends.roblox.com/v1/users/${user.id}/friends/count`));
-        let friends = await friendsRes.json();
-
-        out.innerHTML += `Username: ${user.name}\nDisplay Name: ${user.displayName}\nID: ${user.id}\nDescription: ${user.description||"None"}\nFollowers: ${followers.count}\nFriends: ${friends.count}\n`;
-
-        await showAvatar(user.id);
-
-    } catch(err){
-        out.innerHTML += "ERROR reaching Roblox API.\n";
-    }
+    });
 }
 
 async function showAvatar(id){
-    const out = term;
     try{
         const res = await fetch(corsProxy + encodeURIComponent(`https://thumbnails.roblox.com/v1/users/avatar?userIds=${id}&size=150x150&format=Png`));
         const data = await res.json();
         if(data.data && data.data[0].imageUrl){
-            out.innerHTML += `Avatar:\n<img class="ascii-img" src="${data.data[0].imageUrl}">\n`;
+            term.innerHTML += `Avatar:\n<img class="ascii-img" src="${data.data[0].imageUrl}">\n`;
         }
     } catch{
-        out.innerHTML += "ERROR loading avatar.\n";
+        term.innerHTML += "ERROR loading avatar.\n";
     }
 }
 
 async function loadAvatar(username){
-    const out = term;
-    try{
-        let res = await fetch(corsProxy + encodeURIComponent("https://users.roblox.com/v1/usernames/users"),{
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({usernames:[username]})
-        });
-        let data = await res.json();
-        if(!data.data || !data.data[0]){
-            out.innerHTML += "ERROR: User not found.\n";
-            return;
+    fakeLoading("RETRIEVING AVATAR...", async ()=>{
+        try{
+            let res = await fetch(corsProxy + encodeURIComponent("https://users.roblox.com/v1/usernames/users"),{
+                method:"POST",
+                headers:{"Content-Type":"application/json"},
+                body: JSON.stringify({usernames:[username]})
+            });
+            let data = await res.json();
+            if(!data.data || !data.data[0]){
+                term.innerHTML += "ERROR: User not found.\n";
+                return;
+            }
+            const user = data.data[0];
+            beepSuccess();
+            await showAvatar(user.id);
+        } catch{
+            term.innerHTML += "ERROR retrieving avatar.\n";
         }
-        const user = data.data[0];
-        await showAvatar(user.id);
-    } catch{
-        out.innerHTML += "ERROR retrieving avatar.\n";
-    }
+    });
+}
+
+// FAKE LOADING ANIMATION
+function fakeLoading(text, cb){
+    term.innerHTML += text + "\n";
+    let bar="";
+    let step=0;
+    const timer = setInterval(()=>{
+        beep();
+        step++;
+        bar += "█";
+        term.innerHTML = text + "\n[" + bar.padEnd(20,' ') + "] " + (step*5) + "%";
+        if(step>=20){
+            clearInterval(timer);
+            setTimeout(cb, 200);
+        }
+    },50);
 }
 </script>
 
