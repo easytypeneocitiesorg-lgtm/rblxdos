@@ -20,13 +20,30 @@
         white-space: pre;
     }
 
+    /* DOS-style input box */
     #inputBox {
-        background-color: black;
+        background: black;
         color: #ccc;
-        border: 1px solid #ccc;
-        width: 300px;
-        padding: 3px;
+        border: none;
+        border-bottom: 1px solid #666;
+        outline: none;
+        width: 320px;
         font-family: "Courier New", monospace;
+        font-size: 16px;
+        padding: 2px;
+    }
+
+    /* DOS-style clickable EXECUTE text */
+    .cmd-btn {
+        color: #ccc;
+        cursor: pointer;
+        text-decoration: none;
+        font-family: "Courier New", monospace;
+        font-size: 16px;
+        margin-left: 10px;
+    }
+    .cmd-btn:hover {
+        text-decoration: underline;
     }
 
     #output {
@@ -37,11 +54,11 @@
 
     .ascii-img {
         image-rendering: pixelated;
-        width: 128px;
+        width: 150px;
         border: 1px solid #333;
+        margin-top: 10px;
     }
 </style>
-
 </head>
 <body>
 
@@ -59,162 +76,169 @@
 ╚══════════════════════════════════════════════════╝
 </div>
 
-<input id="inputBox" placeholder="Enter command...">
-<button onclick="runCommand()">EXECUTE</button>
+<input id="inputBox" placeholder="">
+<span class="cmd-btn" onclick="runCommand()">[ EXECUTE ]</span>
 
 <div id="output"></div>
 
 <audio id="beep1" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
-<audio id="beep2" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
 
 <script>
-function beep() { document.getElementById("beep1").play(); }
-function beep2() { document.getElementById("beep2").play(); }
+function beep(){ document.getElementById("beep1").play(); }
 
-function fakeLoading(text, callback) {
+function fakeLoading(text, cb){
     const out = document.getElementById("output");
     out.textContent = text + "\n";
-    let bar = "";
-    let step = 0;
-    const interval = setInterval(() => {
+    let progress = 0;
+
+    const timer = setInterval(()=>{
         beep();
-        bar += "█";
-        step++;
-        out.textContent = text + "\n[" + bar.padEnd(20, ' ') + "] " + (step*5) + "%";
-        if(step >= 20){
-            clearInterval(interval);
-            setTimeout(()=>{ beep2(); callback(); }, 300);
+        progress++;
+        out.textContent = text + "\n[" + "█".repeat(progress) + " ".repeat(20-progress) + "] " + (progress*5) + "%";
+        if(progress >= 20){
+            clearInterval(timer);
+            setTimeout(cb, 200);
         }
-    }, 70);
+    }, 60);
 }
 
-// -------------------------
-// COMMAND HANDLER
-// -------------------------
-let waitingForUsername = null;
+let mode = null; // "command", "profile", "avatar"
+document.getElementById("inputBox").placeholder = "Enter command...";
 
-function runCommand() {
-    const cmd = document.getElementById("inputBox").value.trim();
+function runCommand(){
+    const value = document.getElementById("inputBox").value.trim();
     const out = document.getElementById("output");
 
-    if(cmd === "1"){
+    // USER IS ENTERING A USERNAME (2nd stage)
+    if(mode === "profile"){
+        loadProfile(value);
+        mode = null;
+        document.getElementById("inputBox").value = "";
+        document.getElementById("inputBox").placeholder = "Enter command...";
+        return;
+    }
+    if(mode === "avatar"){
+        loadAvatar(value);
+        mode = null;
+        document.getElementById("inputBox").value = "";
+        document.getElementById("inputBox").placeholder = "Enter command...";
+        return;
+    }
+
+    // INITIAL COMMAND INPUT
+    if(value === "1"){
         out.textContent = "Enter Roblox username:";
-        waitingForUsername = "profile";
-    } else if(cmd === "2"){
-        out.textContent = "Roblox blocked embedding friends list.\nUse profile lookup instead.";
-    } else if(cmd === "3"){
+        mode = "profile";
+        document.getElementById("inputBox").value = "";
+        document.getElementById("inputBox").placeholder = "Roblox Username...";
+    }
+    else if(value === "2"){
+        out.textContent = "Friends list cannot be embedded.\nUse profile lookup instead.";
+    }
+    else if(value === "3"){
         out.textContent = "Enter Roblox username:";
-        waitingForUsername = "avatar";
-    } else if(cmd === "4"){
-        out.textContent = "Messages cannot be embedded.\nUse Roblox directly.";
-    } else {
+        mode = "avatar";
+        document.getElementById("inputBox").value = "";
+        document.getElementById("inputBox").placeholder = "Roblox Username...";
+    }
+    else if(value === "4"){
+        out.textContent = "Messages cannot be embedded.";
+    }
+    else {
         out.textContent = "Unknown command.";
     }
 }
 
-// -----------------------------
-// HANDLE USER INPUT SEQUENCES
-// -----------------------------
+// ENTER KEY SUPPORT
 document.getElementById("inputBox").addEventListener("keydown", function(e){
-    if(e.key==="Enter" && waitingForUsername){
-        const username = this.value.trim();
-        if(!username) return;
-
-        if(waitingForUsername === "profile") loadProfile(username);
-        if(waitingForUsername === "avatar") loadAvatar(username);
-
-        waitingForUsername = null;
-    }
+    if(e.key === "Enter") runCommand();
 });
 
-// -----------------------------------
-// REAL ROBLOX PROFILE LOOKUP
-// -----------------------------------
+// =============== REAL ROBLOX API LOOKUP ===================
 async function loadProfile(username){
     fakeLoading("ACCESSING ROBLOX DATABASE...", async ()=>{
         const out = document.getElementById("output");
 
         try{
-            // Fetch basic user info
-            const res = await fetch(`https://users.roblox.com/v1/usernames/users`, {
+            let userRes = await fetch("https://users.roblox.com/v1/usernames/users", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ usernames: [username] })
             });
-            const data = await res.json();
-            if(!data.data || !data.data[0]){
+            let userData = await userRes.json();
+
+            if(!userData.data || !userData.data[0]){
                 out.textContent = "ERROR: User not found.";
                 return;
             }
 
-            const user = data.data[0];
+            const user = userData.data[0];
 
-            // Fetch followers & friends counts
+            // Friends + followers
             const followersRes = await fetch(`https://friends.roblox.com/v1/users/${user.id}/followers/count`);
-            const followersData = await followersRes.json();
+            const followers = await followersRes.json();
+
             const friendsRes = await fetch(`https://friends.roblox.com/v1/users/${user.id}/friends/count`);
-            const friendsData = await friendsRes.json();
+            const friends = await friendsRes.json();
 
             out.textContent =
-                "USER PROFILE DATA\n" +
+                "USER PROFILE\n" +
                 "══════════════════════\n" +
                 "Username: " + user.name + "\n" +
                 "Display Name: " + user.displayName + "\n" +
                 "User ID: " + user.id + "\n" +
                 "Description: " + (user.description || "None") + "\n" +
-                "Followers: " + (followersData.count ?? "N/A") + "\n" +
-                "Friends: " + (friendsData.count ?? "N/A") + "\n\n" +
-                "Fetching Avatar...\n";
+                "Followers: " + followers.count + "\n" +
+                "Friends: " + friends.count + "\n\n" +
+                "Fetching avatar...\n";
 
             showAvatar(user.id);
 
         } catch(err){
-            out.textContent = "ERROR: Failed to reach Roblox API.";
-            console.error(err);
+            out.textContent = "ERROR reaching Roblox API.";
         }
     });
 }
 
-// -----------------------------------
-// FETCH AVATAR
-// -----------------------------------
 async function showAvatar(id){
     const out = document.getElementById("output");
     try{
-        const res = await fetch(`https://thumbnails.roblox.com/v1/users/avatar?userIds=${id}&size=150x150&format=Png&isCircular=false`);
+        const res = await fetch(`https://thumbnails.roblox.com/v1/users/avatar?userIds=${id}&size=150x150&format=Png`);
         const data = await res.json();
-        if(data.data && data.data[0] && data.data[0].imageUrl){
-            out.innerHTML += "\nAVATAR:\n\n";
+        if(data.data && data.data[0].imageUrl){
             out.innerHTML += `<img class="ascii-img" src="${data.data[0].imageUrl}">`;
         }
     } catch {
-        out.textContent += "\nERROR: Could not load avatar image.";
+        out.textContent += "\nERROR loading avatar.";
     }
 }
 
-// -----------------------------------
-// AVATAR-ONLY LOOKUP
-// -----------------------------------
 async function loadAvatar(username){
     fakeLoading("RETRIEVING AVATAR...", async ()=>{
         const out = document.getElementById("output");
+
         try{
-            const res = await fetch(`https://users.roblox.com/v1/usernames/users`, {
+            let res = await fetch("https://users.roblox.com/v1/usernames/users", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ usernames: [username] })
             });
-            const data = await res.json();
+            let data = await res.json();
+
             if(!data.data || !data.data[0]){
                 out.textContent = "ERROR: User not found.";
                 return;
             }
+
             const user = data.data[0];
             out.textContent = "Username: " + user.name + "\nUser ID: " + user.id + "\n\n";
+
             showAvatar(user.id);
+            
         } catch {
-            out.textContent = "ERROR retrieving user info.";
+            out.textContent = "ERROR retrieving avatar.";
         }
+
     });
 }
 </script>
