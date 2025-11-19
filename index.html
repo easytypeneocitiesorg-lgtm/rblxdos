@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>RBX-DOS Terminal</title>
+
+<style>
+    body {
+        background-color: black;
+        color: #ccc;
+        font-family: "Courier New", monospace;
+        padding: 20px;
+    }
+
+    #frame {
+        border: 2px solid #ccc;
+        padding: 10px;
+        width: 640px;
+        margin-bottom: 20px;
+        white-space: pre;
+    }
+
+    #inputBox {
+        background-color: black;
+        color: #ccc;
+        border: 1px solid #ccc;
+        width: 300px;
+        padding: 3px;
+        font-family: "Courier New", monospace;
+    }
+
+    #output {
+        white-space: pre-wrap;
+        color: #ccc;
+        margin-top: 20px;
+    }
+
+    .ascii-img {
+        image-rendering: pixelated;
+        width: 128px;
+        border: 1px solid #333;
+    }
+</style>
+
+</head>
+<body>
+
+<div id="frame">
+╔══════════════════════════════════════════════════╗
+║               ROBLOX DOS INTERFACE               ║
+╠══════════════════════════════════════════════════╣
+║ Commands:                                        ║
+║  [1] OPEN USER PROFILE                           ║
+║  [2] FRIENDS LIST                                ║
+║  [3] AVATAR INFO                                 ║
+║  [4] MESSAGES                                    ║
+║                                                  ║
+║ Type a command number below:                     ║
+╚══════════════════════════════════════════════════╝
+</div>
+
+<input id="inputBox" placeholder="Enter command...">
+<button onclick="runCommand()">EXECUTE</button>
+
+<div id="output"></div>
+
+<audio id="beep1" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+<audio id="beep2" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+
+<script>
+function beep() { document.getElementById("beep1").play(); }
+function beep2() { document.getElementById("beep2").play(); }
+
+function fakeLoading(text, callback) {
+    const out = document.getElementById("output");
+    out.textContent = text + "\n";
+    let bar = "";
+    let step = 0;
+    const interval = setInterval(() => {
+        beep();
+        bar += "█";
+        step++;
+        out.textContent = text + "\n[" + bar.padEnd(20, ' ') + "] " + (step*5) + "%";
+        if(step >= 20){
+            clearInterval(interval);
+            setTimeout(()=>{ beep2(); callback(); }, 300);
+        }
+    }, 70);
+}
+
+// -------------------------
+// COMMAND HANDLER
+// -------------------------
+let waitingForUsername = null;
+
+function runCommand() {
+    const cmd = document.getElementById("inputBox").value.trim();
+    const out = document.getElementById("output");
+
+    if(cmd === "1"){
+        out.textContent = "Enter Roblox username:";
+        waitingForUsername = "profile";
+    } else if(cmd === "2"){
+        out.textContent = "Roblox blocked embedding friends list.\nUse profile lookup instead.";
+    } else if(cmd === "3"){
+        out.textContent = "Enter Roblox username:";
+        waitingForUsername = "avatar";
+    } else if(cmd === "4"){
+        out.textContent = "Messages cannot be embedded.\nUse Roblox directly.";
+    } else {
+        out.textContent = "Unknown command.";
+    }
+}
+
+// -----------------------------
+// HANDLE USER INPUT SEQUENCES
+// -----------------------------
+document.getElementById("inputBox").addEventListener("keydown", function(e){
+    if(e.key==="Enter" && waitingForUsername){
+        const username = this.value.trim();
+        if(!username) return;
+
+        if(waitingForUsername === "profile") loadProfile(username);
+        if(waitingForUsername === "avatar") loadAvatar(username);
+
+        waitingForUsername = null;
+    }
+});
+
+// -----------------------------------
+// REAL ROBLOX PROFILE LOOKUP
+// -----------------------------------
+async function loadProfile(username){
+    fakeLoading("ACCESSING ROBLOX DATABASE...", async ()=>{
+        const out = document.getElementById("output");
+
+        try{
+            // Fetch basic user info
+            const res = await fetch(`https://users.roblox.com/v1/usernames/users`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ usernames: [username] })
+            });
+            const data = await res.json();
+            if(!data.data || !data.data[0]){
+                out.textContent = "ERROR: User not found.";
+                return;
+            }
+
+            const user = data.data[0];
+
+            // Fetch followers & friends counts
+            const followersRes = await fetch(`https://friends.roblox.com/v1/users/${user.id}/followers/count`);
+            const followersData = await followersRes.json();
+            const friendsRes = await fetch(`https://friends.roblox.com/v1/users/${user.id}/friends/count`);
+            const friendsData = await friendsRes.json();
+
+            out.textContent =
+                "USER PROFILE DATA\n" +
+                "══════════════════════\n" +
+                "Username: " + user.name + "\n" +
+                "Display Name: " + user.displayName + "\n" +
+                "User ID: " + user.id + "\n" +
+                "Description: " + (user.description || "None") + "\n" +
+                "Followers: " + (followersData.count ?? "N/A") + "\n" +
+                "Friends: " + (friendsData.count ?? "N/A") + "\n\n" +
+                "Fetching Avatar...\n";
+
+            showAvatar(user.id);
+
+        } catch(err){
+            out.textContent = "ERROR: Failed to reach Roblox API.";
+            console.error(err);
+        }
+    });
+}
+
+// -----------------------------------
+// FETCH AVATAR
+// -----------------------------------
+async function showAvatar(id){
+    const out = document.getElementById("output");
+    try{
+        const res = await fetch(`https://thumbnails.roblox.com/v1/users/avatar?userIds=${id}&size=150x150&format=Png&isCircular=false`);
+        const data = await res.json();
+        if(data.data && data.data[0] && data.data[0].imageUrl){
+            out.innerHTML += "\nAVATAR:\n\n";
+            out.innerHTML += `<img class="ascii-img" src="${data.data[0].imageUrl}">`;
+        }
+    } catch {
+        out.textContent += "\nERROR: Could not load avatar image.";
+    }
+}
+
+// -----------------------------------
+// AVATAR-ONLY LOOKUP
+// -----------------------------------
+async function loadAvatar(username){
+    fakeLoading("RETRIEVING AVATAR...", async ()=>{
+        const out = document.getElementById("output");
+        try{
+            const res = await fetch(`https://users.roblox.com/v1/usernames/users`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ usernames: [username] })
+            });
+            const data = await res.json();
+            if(!data.data || !data.data[0]){
+                out.textContent = "ERROR: User not found.";
+                return;
+            }
+            const user = data.data[0];
+            out.textContent = "Username: " + user.name + "\nUser ID: " + user.id + "\n\n";
+            showAvatar(user.id);
+        } catch {
+            out.textContent = "ERROR retrieving user info.";
+        }
+    });
+}
+</script>
+
+</body>
+</html>
