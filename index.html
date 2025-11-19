@@ -6,7 +6,7 @@
 <style>
 body {
     background-color: black;
-    color: #ccc; /* gray text, no green */
+    color: #ccc;
     font-family: "Courier New", monospace;
     padding: 20px;
 }
@@ -20,6 +20,12 @@ body {
     white-space: pre-wrap;
 }
 
+#inputContainer {
+    display: flex;
+    align-items: center;
+    margin-top: 5px;
+}
+
 input {
     background: black;
     color: #ccc;
@@ -27,7 +33,7 @@ input {
     outline: none;
     font-family: "Courier New", monospace;
     font-size: 16px;
-    width: 600px;
+    flex: 1;
 }
 
 .blink {
@@ -51,8 +57,9 @@ input {
 <body>
 
 <div id="terminal"></div>
-<div>
-<input id="cmdInput" autocomplete="off"><span class="blink">&nbsp;</span>
+<div id="inputContainer">
+    <input id="cmdInput" autocomplete="off" autofocus>
+    <span class="blink">&nbsp;</span>
 </div>
 
 <!-- Sound beeps -->
@@ -70,44 +77,57 @@ function beepSuccess(){ beep2.play(); }
 
 let commandHistory = [];
 let historyIndex = 0;
+let waitingForUsername = null; // "profile" or "avatar"
 
-input.focus();
-
-// COMMAND SYSTEM
 input.addEventListener("keydown", async (e)=>{
-    if(e.key==="Enter"){
+    if(e.key === "Enter"){
         const cmd = input.value.trim();
         commandHistory.push(cmd);
         historyIndex = commandHistory.length;
-        term.innerHTML += `${cmd}\n`;
         input.value = "";
-        await handleCommand(cmd);
+
+        if(waitingForUsername){
+            const username = cmd;
+            if(waitingForUsername === "profile") await loadProfile(username);
+            else if(waitingForUsername === "avatar") await loadAvatar(username);
+            waitingForUsername = null;
+        } else {
+            term.innerHTML += cmd + "\n";
+            await handleCommand(cmd);
+        }
         term.scrollTop = term.scrollHeight;
-    } else if(e.key==="ArrowUp"){
-        if(historyIndex>0) historyIndex--;
-        input.value = commandHistory[historyIndex]||"";
-    } else if(e.key==="ArrowDown"){
-        if(historyIndex<commandHistory.length-1) historyIndex++;
-        input.value = commandHistory[historyIndex]||"";
+    } else if(e.key === "ArrowUp"){
+        if(historyIndex > 0) historyIndex--;
+        input.value = commandHistory[historyIndex] || "";
+    } else if(e.key === "ArrowDown"){
+        if(historyIndex < commandHistory.length-1) historyIndex++;
+        input.value = commandHistory[historyIndex] || "";
     }
 });
 
 async function handleCommand(cmd){
-    const args = cmd.split(" ");
-    const main = args[0].toLowerCase();
+    const parts = cmd.trim().split(/\s+/);
+    const main = parts[0].toLowerCase();
+    const arg = parts[1];
 
-    if(main==="profile" && args[1]){
-        term.innerHTML += "Loading profile...\n";
-        beep();
-        await loadProfile(args[1]);
-    } else if(main==="avatar" && args[1]){
-        term.innerHTML += "Loading avatar...\n";
-        beep();
-        await loadAvatar(args[1]);
-    } else if(main==="help"){
+    if(main === "profile"){
+        if(arg){
+            await loadProfile(arg);
+        } else {
+            term.innerHTML += "Enter username for profile:\n";
+            waitingForUsername = "profile";
+        }
+    } else if(main === "avatar"){
+        if(arg){
+            await loadAvatar(arg);
+        } else {
+            term.innerHTML += "Enter username for avatar:\n";
+            waitingForUsername = "avatar";
+        }
+    } else if(main === "help"){
         beep();
         term.innerHTML += "Commands:\n profile <username>\n avatar <username>\n help\n clear\n";
-    } else if(main==="clear"){
+    } else if(main === "clear"){
         beep();
         term.innerHTML = "";
     } else {
@@ -116,40 +136,68 @@ async function handleCommand(cmd){
     }
 }
 
-// CORS Roblox API
-const corsProxy = "https://corsproxy.io/?"; // Can swap if needed
+// --------------- FAKE LOADING BAR ---------------
+function randomBetween(min,max){ return min + Math.random()*(max-min); }
+
+async function fakeLoading(text){
+    term.innerHTML += text + "\n";
+    const totalDuration = randomBetween(2000,10000); // 2-10 sec
+    const barLength = 20;
+    let elapsed = 0;
+
+    beep(); // start beep
+
+    while(elapsed < totalDuration){
+        const stepTime = randomBetween(50,150);
+        await new Promise(r => setTimeout(r, stepTime));
+
+        elapsed += stepTime;
+        const progress = Math.min(1, elapsed/totalDuration);
+        const filled = Math.floor(progress * barLength);
+        const bar = "█".repeat(filled).padEnd(barLength,' ');
+        term.innerHTML = text + "\n[" + bar + "] " + Math.floor(progress*100) + "%";
+
+        // Random stops
+        if(Math.random() < 0.05){
+            const stopDuration = randomBetween(500,3000);
+            await new Promise(r => setTimeout(r, stopDuration));
+        }
+    }
+
+    beepSuccess(); // finish beep
+}
+
+// --------------- ROBLOX API ---------------
+const corsProxy = "https://corsproxy.io/?";
 
 async function loadProfile(username){
-    fakeLoading("ACCESSING ROBLOX DATABASE...", async ()=>{
-        try{
-            let userRes = await fetch(corsProxy + encodeURIComponent("https://users.roblox.com/v1/usernames/users"),{
-                method:"POST",
-                headers:{"Content-Type":"application/json"},
-                body: JSON.stringify({usernames:[username]})
-            });
-            let userData = await userRes.json();
-            if(!userData.data || !userData.data[0]){
-                term.innerHTML += "ERROR: User not found.\n";
-                return;
-            }
-            const user = userData.data[0];
-
-            // Followers and friends count
-            let followersRes = await fetch(corsProxy + encodeURIComponent(`https://friends.roblox.com/v1/users/${user.id}/followers/count`));
-            let followers = await followersRes.json();
-
-            let friendsRes = await fetch(corsProxy + encodeURIComponent(`https://friends.roblox.com/v1/users/${user.id}/friends/count`));
-            let friends = await friendsRes.json();
-
-            term.innerHTML +=
-                `Username: ${user.name}\nDisplay Name: ${user.displayName}\nID: ${user.id}\nDescription: ${user.description||"None"}\nFollowers: ${followers.count}\nFriends: ${friends.count}\n`;
-
-            beepSuccess();
-            await showAvatar(user.id);
-        } catch{
-            term.innerHTML += "ERROR reaching Roblox API.\n";
+    await fakeLoading(`ACCESSING ROBLOX DATABASE FOR ${username}...`);
+    try{
+        const resUser = await fetch(corsProxy + encodeURIComponent("https://users.roblox.com/v1/usernames/users"),{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({usernames:[username]})
+        });
+        const dataUser = await resUser.json();
+        if(!dataUser.data || !dataUser.data[0]){
+            term.innerHTML += "ERROR: User not found.\n";
+            return;
         }
-    });
+        const user = dataUser.data[0];
+
+        const followersRes = await fetch(corsProxy + encodeURIComponent(`https://friends.roblox.com/v1/users/${user.id}/followers/count`));
+        const followers = await followersRes.json();
+
+        const friendsRes = await fetch(corsProxy + encodeURIComponent(`https://friends.roblox.com/v1/users/${user.id}/friends/count`));
+        const friends = await friendsRes.json();
+
+        term.innerHTML += `Username: ${user.name}\nDisplay Name: ${user.displayName}\nID: ${user.id}\nDescription: ${user.description||"None"}\nFollowers: ${followers.count}\nFriends: ${friends.count}\n`;
+
+        await showAvatar(user.id);
+
+    } catch{
+        term.innerHTML += "ERROR reaching Roblox API.\n";
+    }
 }
 
 async function showAvatar(id){
@@ -165,42 +213,23 @@ async function showAvatar(id){
 }
 
 async function loadAvatar(username){
-    fakeLoading("RETRIEVING AVATAR...", async ()=>{
-        try{
-            let res = await fetch(corsProxy + encodeURIComponent("https://users.roblox.com/v1/usernames/users"),{
-                method:"POST",
-                headers:{"Content-Type":"application/json"},
-                body: JSON.stringify({usernames:[username]})
-            });
-            let data = await res.json();
-            if(!data.data || !data.data[0]){
-                term.innerHTML += "ERROR: User not found.\n";
-                return;
-            }
-            const user = data.data[0];
-            beepSuccess();
-            await showAvatar(user.id);
-        } catch{
-            term.innerHTML += "ERROR retrieving avatar.\n";
+    await fakeLoading(`RETRIEVING AVATAR FOR ${username}...`);
+    try{
+        const res = await fetch(corsProxy + encodeURIComponent("https://users.roblox.com/v1/usernames/users"),{
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({usernames:[username]})
+        });
+        const data = await res.json();
+        if(!data.data || !data.data[0]){
+            term.innerHTML += "ERROR: User not found.\n";
+            return;
         }
-    });
-}
-
-// FAKE LOADING ANIMATION
-function fakeLoading(text, cb){
-    term.innerHTML += text + "\n";
-    let bar="";
-    let step=0;
-    const timer = setInterval(()=>{
-        beep();
-        step++;
-        bar += "█";
-        term.innerHTML = text + "\n[" + bar.padEnd(20,' ') + "] " + (step*5) + "%";
-        if(step>=20){
-            clearInterval(timer);
-            setTimeout(cb, 200);
-        }
-    },50);
+        const user = data.data[0];
+        await showAvatar(user.id);
+    } catch{
+        term.innerHTML += "ERROR retrieving avatar.\n";
+    }
 }
 </script>
 
