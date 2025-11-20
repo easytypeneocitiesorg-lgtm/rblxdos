@@ -38,11 +38,11 @@ input {
 }
 
 .ascii-img {
-    width: 1080px;   /* full HD width */
-    height: 1080px;  /* full HD height */
+    width: 720px;   /* high-res but reliable */
+    height: 720px;
     border: 1px solid #ccc;
     margin-top: 5px;
-    image-rendering: pixelated; /* optional retro look */
+    image-rendering: pixelated;
 }
 </style>
 </head>
@@ -131,7 +131,10 @@ async function handleCommand(cmd){
 function randomBetween(min,max){ return min + Math.random()*(max-min); }
 
 async function fakeLoading(text){
-    term.innerHTML += text + "\n";
+    const loadingDiv = document.createElement("div");
+    loadingDiv.textContent = text + "\n";
+    term.appendChild(loadingDiv);
+
     const totalDuration = randomBetween(2000,10000); // 2-10 sec
     const barLength = 20;
     let elapsed = 0;
@@ -141,12 +144,13 @@ async function fakeLoading(text){
     while(elapsed < totalDuration){
         const stepTime = randomBetween(50,150);
         await new Promise(r => setTimeout(r, stepTime));
-
         elapsed += stepTime;
+
         const progress = Math.min(1, elapsed/totalDuration);
         const filled = Math.floor(progress * barLength);
         const bar = "█".repeat(filled).padEnd(barLength,' ');
-        term.innerHTML = text + "\n[" + bar + "] " + Math.floor(progress*100) + "%";
+
+        loadingDiv.textContent = text + "\n[" + bar + "] " + Math.floor(progress*100) + "%";
 
         // Random stops
         if(Math.random() < 0.05){
@@ -182,7 +186,15 @@ async function loadProfile(username){
         const friendsRes = await fetch(corsProxy + encodeURIComponent(`https://friends.roblox.com/v1/users/${user.id}/friends/count`));
         const friends = await friendsRes.json();
 
-        term.innerHTML += `Username: ${user.name}\nDisplay Name: ${user.displayName}\nID: ${user.id}\nDescription: ${user.description||"None"}\nFollowers: ${followers.count}\nFriends: ${friends.count}\n`;
+        const profileDiv = document.createElement("div");
+        profileDiv.innerHTML = 
+            `Username: ${user.name}\n` +
+            `Display Name: ${user.displayName}\n` +
+            `ID: ${user.id}\n` +
+            `Description: ${user.description||"None"}\n` +
+            `Followers: ${followers.count}\n` +
+            `Friends: ${friends.count}\n`;
+        term.appendChild(profileDiv);
 
         await showAvatar(user.id);
 
@@ -194,11 +206,15 @@ async function loadProfile(username){
 async function showAvatar(id){
     try{
         const res = await fetch(corsProxy + encodeURIComponent(
-            `https://thumbnails.roblox.com/v1/users/avatar?userIds=${id}&size=1080x1080&format=Png`
+            `https://thumbnails.roblox.com/v1/users/avatar?userIds=${id}&size=720x720&format=Png`
         ));
         const data = await res.json();
         if(data.data && data.data[0].imageUrl){
-            term.innerHTML += `Avatar:\n<img class="ascii-img" src="${data.data[0].imageUrl}">\n`;
+            const imgDiv = document.createElement("div");
+            imgDiv.innerHTML = `<img class="ascii-img" src="${data.data[0].imageUrl}">`;
+            term.appendChild(imgDiv);
+        } else {
+            term.innerHTML += "Avatar unavailable at this resolution.\n";
         }
     } catch{
         term.innerHTML += "ERROR loading avatar.\n";
